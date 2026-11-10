@@ -1,0 +1,1023 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Next Train</title>
+<meta name="description" content="Live departures for London Underground, Elizabeth line, Overground, DLR and tram stations.">
+<meta name="theme-color" content="#F3F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F0D15" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://api.tfl.gov.uk" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&family=Overpass+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one phone-width column. Station header, saved-station strip, direction switch,
+   a dark platform-display panel for the next train, then the rest of the board as ruled rows. */
+:root{
+  --bg:#F3F2F7; --surface:#FFFFFF; --ink:#16131F; --muted:#5F5970; --rule:#DEDAE7; --chip:#E9E6F0;
+  --accent:#6950A1; --accent-ink:#FFFFFF;
+  --lcd:#15121D; --lcd-ink:#FFFFFF; --lcd-dim:#ABA4BE; --lcd-amber:#FFC94D;
+  --ok:#1D7A4B; --warn:#9A5300; --bad:#B3261E;
+  --font-ui:"Overpass", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:"Overpass Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0F0D15; --surface:#1A1723; --ink:#F2EFF8; --muted:#A39DB3; --rule:#2D2939; --chip:#262231;
+    --accent:#A58FE6; --accent-ink:#120F1A;
+    --lcd:#060509; --lcd-ink:#FFFFFF; --lcd-dim:#9C96AE; --lcd-amber:#FFCC5C;
+    --ok:#5CCB8D; --warn:#F2A647; --bad:#FF7A70;
+    color-scheme: dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:var(--font-ui); font-size:16px; line-height:1.4;
+  -webkit-font-smoothing:antialiased; -webkit-tap-highlight-color:transparent;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:8px}
+
+.wrap{
+  max-width:560px; margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:14px 32px;
+  display:flex; flex-direction:column; gap:14px;
+}
+
+/* Header */
+.top{display:flex;flex-direction:column;gap:8px}
+.top-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.station-btn{
+  appearance:none;border:0;background:none;padding:0;text-align:left;min-width:0;
+  display:flex;flex-direction:column;gap:2px;
+}
+.eyebrow{font-size:.74rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.station-name{
+  display:flex;align-items:center;gap:6px;
+  font-size:1.75rem;font-weight:800;line-height:1.1;letter-spacing:-.01em;text-wrap:balance;
+}
+.station-name svg{flex:none;width:22px;height:22px;color:var(--muted)}
+.top-actions{display:flex;gap:4px;flex:none}
+.icon-btn{
+  appearance:none;border:0;background:transparent;border-radius:12px;
+  width:44px;height:44px;display:grid;place-items:center;color:var(--ink);
+}
+.icon-btn:hover{background:var(--chip)}
+.icon-btn svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#fav-btn[aria-pressed="true"] svg{fill:var(--lcd-amber);stroke:var(--warn)}
+.lines{display:flex;flex-wrap:wrap;gap:6px}
+.line-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:.82rem;font-weight:600;padding:3px 10px 2px 8px;border-radius:999px;background:var(--chip);
+}
+.line-chip::before{content:"";width:10px;height:10px;border-radius:3px;background:var(--line,var(--accent));box-shadow:inset 0 0 0 1px rgb(127 127 127 / .35)}
+
+/* Saved stations strip */
+.favs{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-inline:-2px;padding:2px}
+.favs::-webkit-scrollbar{display:none}
+.fav{
+  flex:none;appearance:none;border:1px solid var(--rule);background:var(--surface);
+  border-radius:999px;padding:7px 14px 6px;font-size:.88rem;font-weight:600;white-space:nowrap;
+}
+.fav[aria-current="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.fav.add{color:var(--muted);border-style:dashed}
+
+/* Controls */
+.controls{display:flex;flex-direction:column;gap:8px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--chip);border-radius:12px;padding:3px;gap:3px}
+.seg button{
+  appearance:none;border:0;background:transparent;border-radius:9px;padding:9px 6px 7px;
+  font-size:.86rem;font-weight:600;color:var(--muted);line-height:1.2;
+}
+.seg button[aria-checked="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .12)}
+.line-filter{display:flex;flex-wrap:wrap;gap:6px}
+.line-filter button{
+  appearance:none;border:1px solid var(--rule);background:transparent;border-radius:999px;
+  padding:5px 12px 4px 10px;font-size:.82rem;font-weight:600;display:inline-flex;align-items:center;gap:6px;
+}
+.line-filter button[data-line]::before{content:"";width:9px;height:9px;border-radius:3px;background:var(--line,var(--accent))}
+.line-filter button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+
+/* Status */
+.status{display:flex;align-items:center;gap:8px;font-size:.84rem;color:var(--muted);min-height:28px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+.status.stale .live-dot{background:var(--warn)}
+.status.loading .live-dot{animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.status .grow{flex:1;min-width:0}
+.text-btn{appearance:none;border:0;background:none;padding:6px 4px;font-weight:600;color:var(--accent);display:inline-flex;align-items:center;gap:4px}
+.text-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.progress{height:2px;background:var(--rule);border-radius:2px;overflow:hidden;margin-top:-8px}
+.progress span{display:block;height:100%;width:0;background:var(--accent)}
+
+.banner{
+  border:1px solid var(--rule);background:var(--surface);border-radius:12px;padding:12px 14px;
+  font-size:.9rem;display:flex;flex-direction:column;gap:8px;
+}
+.banner strong{color:var(--bad)}
+
+/* Next-train platform display */
+.next{background:var(--lcd);color:var(--lcd-ink);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+.next-head{
+  display:flex;justify-content:space-between;align-items:center;gap:10px;
+  background:var(--line,var(--accent));color:var(--line-ink,#fff);
+  padding:8px 16px 6px;font-size:.78rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;
+}
+.next-head .plat{font-family:var(--font-mono);letter-spacing:.02em;text-transform:none;font-weight:700;font-size:.86rem}
+.next-body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:10px}
+.next-main{display:flex;align-items:flex-end;justify-content:space-between;gap:14px}
+.next-dest{font-size:1.55rem;font-weight:800;line-height:1.12;text-wrap:balance;min-width:0;overflow-wrap:anywhere}
+.next-when{flex:none;display:flex;align-items:baseline;gap:4px;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.next-when .big{font-size:3.3rem;font-weight:700;line-height:.9;color:var(--lcd-amber)}
+.next-when .unit{font-size:1rem;font-weight:500;color:var(--lcd-dim)}
+.next-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;font-size:.88rem;color:var(--lcd-dim)}
+.next-meta .clock{font-family:var(--font-mono);font-weight:700;color:var(--lcd-ink);font-variant-numeric:tabular-nums}
+.next.empty .next-body{padding:18px 16px}
+.next.empty p{margin:0;color:var(--lcd-dim)}
+.next.empty strong{display:block;color:var(--lcd-ink);font-size:1.15rem;margin-bottom:4px}
+.lcd-btn{appearance:none;border:1px solid rgb(255 255 255 / .25);background:transparent;color:var(--lcd-ink);border-radius:10px;padding:8px 12px 6px;font-weight:600;margin-top:10px}
+
+.pill{display:inline-flex;align-items:center;font-size:.78rem;font-weight:700;padding:2px 8px 1px;border-radius:6px;line-height:1.5}
+.next .pill.ok{background:rgb(92 203 141 / .16);color:#7BE0A6}
+.next .pill.warn{background:rgb(255 201 77 / .16);color:var(--lcd-amber)}
+.next .pill.bad{background:rgb(255 122 112 / .16);color:#FF8F86}
+
+/* Board list */
+.board-wrap{display:flex;flex-direction:column;gap:6px}
+.board-title{font-size:.74rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:4px 0 0}
+.board{list-style:none;margin:0;padding:0;background:var(--surface);border-radius:14px;border:1px solid var(--rule)}
+.dep{display:grid;grid-template-columns:12px minmax(0,1fr) auto;align-items:center;gap:12px;padding:12px 14px}
+.dep + .dep{border-top:1px solid var(--rule)}
+.dep .sq{width:12px;height:12px;border-radius:3px;background:var(--line,var(--accent));box-shadow:inset 0 0 0 1px rgb(127 127 127 / .35)}
+.dep-dest{font-size:1.08rem;font-weight:700;line-height:1.2;overflow-wrap:anywhere}
+.dep-sub{font-size:.82rem;color:var(--muted);margin-top:2px;display:flex;flex-wrap:wrap;gap:2px 6px}
+.dep-sub span + span::before{content:"·";margin-right:6px;color:var(--muted);font-weight:400}
+.dep-sub .s-warn{color:var(--warn);font-weight:700}
+.dep-sub .s-bad{color:var(--bad);font-weight:700}
+.dep-sub .s-ok{color:var(--ok);font-weight:600}
+.dep-time{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums;display:flex;flex-direction:column;align-items:flex-end}
+.dep-mins{font-size:1.12rem;font-weight:700;white-space:nowrap}
+.dep-clock{font-size:.8rem;color:var(--muted)}
+.dep.cancelled .dep-dest,.dep.cancelled .dep-time{opacity:.55}
+.dep.cancelled .dep-mins{text-decoration:line-through}
+.board-empty{padding:16px 14px;color:var(--muted);font-size:.9rem}
+
+.skel{height:14px;border-radius:6px;background:var(--chip)}
+.loading-rows .dep .skel{animation:pulse 1.2s ease-in-out infinite}
+
+footer{font-size:.78rem;color:var(--muted);display:flex;flex-direction:column;gap:4px;padding-top:6px}
+footer a{color:inherit}
+
+/* Sheets */
+dialog.sheet{
+  border:0;padding:0;margin:auto auto 0;width:100%;max-width:560px;max-height:88vh;
+  border-radius:20px 20px 0 0;background:var(--surface);color:var(--ink);
+}
+@media (min-width:600px){dialog.sheet{margin:auto;border-radius:20px}}
+dialog.sheet::backdrop{background:rgb(8 6 14 / .55)}
+.sheet-inner{
+  max-height:88vh;overflow:auto;display:flex;flex-direction:column;gap:12px;
+  padding-top:16px;padding-bottom:calc(22px + env(safe-area-inset-bottom,0px));
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sheet-head h2{margin:0;font-size:1.25rem;font-weight:800}
+.field-label{font-size:.84rem;color:var(--muted)}
+.input{
+  width:100%;font:inherit;font-size:1.05rem;padding:12px 14px 10px;border-radius:12px;
+  border:1.5px solid var(--rule);background:var(--bg);color:var(--ink);
+}
+.input:focus{outline:none;border-color:var(--accent)}
+.results,.saved{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.results li + li,.saved li + li{border-top:1px solid var(--rule)}
+.result-btn{
+  appearance:none;border:0;background:none;width:100%;text-align:left;padding:12px 2px;
+  display:flex;flex-direction:column;gap:4px;
+}
+.result-btn .r-name{font-weight:700;font-size:1.02rem}
+.result-btn .r-modes{font-size:.8rem;color:var(--muted)}
+.saved li{display:flex;align-items:center;gap:8px}
+.saved .result-btn{flex:1;min-width:0}
+.sub-h{margin:8px 0 0;font-size:.74rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.hint{font-size:.88rem;color:var(--muted);margin:0}
+.primary{
+  appearance:none;border:0;background:var(--accent);color:var(--accent-ink);font-weight:700;
+  border-radius:12px;padding:12px 16px 10px;font-size:1rem;
+}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.ghost{appearance:none;border:1px solid var(--rule);background:transparent;border-radius:12px;padding:11px 16px 9px;font-weight:600}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation:none!important;transition:none!important}
+  .progress{display:none}
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div class="top-row">
+      <button class="station-btn" id="station-btn" type="button" aria-haspopup="dialog" aria-label="Change station">
+        <span class="eyebrow">Departures from</span>
+        <span class="station-name"><span id="station-name">Finding station…</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </span>
+      </button>
+      <div class="top-actions">
+        <button class="icon-btn" id="fav-btn" type="button" aria-pressed="false" aria-label="Save this station">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6l2.55 5.2 5.75.83-4.16 4.06.98 5.72L12 16.7l-5.12 2.7.98-5.72L3.7 9.63l5.75-.83z"/></svg>
+        </button>
+        <button class="icon-btn" id="settings-btn" type="button" aria-label="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="lines" id="lines"></div>
+  </header>
+
+  <nav class="favs" id="favs" aria-label="Saved stations"></nav>
+
+  <div class="controls">
+    <div class="seg" id="dir-seg" role="radiogroup" aria-label="Direction" hidden>
+      <button type="button" role="radio" data-dir="towards" aria-checked="false">To central London</button>
+      <button type="button" role="radio" data-dir="away" aria-checked="false">Away</button>
+      <button type="button" role="radio" data-dir="all" aria-checked="true">All</button>
+    </div>
+    <div class="line-filter" id="line-filter" hidden></div>
+  </div>
+
+  <div class="status" id="status">
+    <span class="live-dot" aria-hidden="true"></span>
+    <span class="grow" id="updated" aria-live="polite">Loading live times…</span>
+    <button class="text-btn" id="refresh-btn" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>Refresh
+    </button>
+  </div>
+  <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
+
+  <div class="banner" id="banner" role="alert" hidden></div>
+
+  <section class="next" id="next" aria-label="Next train"></section>
+
+  <section class="board-wrap" aria-label="Later departures">
+    <h2 class="board-title" id="board-title">Later departures</h2>
+    <ol class="board" id="board"></ol>
+  </section>
+
+  <footer>
+    <span>Powered by TfL Open Data. Times are live predictions and can change.</span>
+    <span id="key-note"></span>
+  </footer>
+</main>
+
+<dialog class="sheet" id="picker" aria-labelledby="picker-title">
+  <div class="sheet-inner">
+    <div class="sheet-head">
+      <h2 id="picker-title">Choose a station</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <label class="field-label" for="station-search">Tube, Elizabeth line, Overground, DLR and tram stations</label>
+    <input class="input" id="station-search" type="search" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="e.g. Stratford" enterkeyhint="search">
+    <p class="hint" id="search-hint">Type at least two letters.</p>
+    <ul class="results" id="results"></ul>
+    <h3 class="sub-h" id="saved-title">Saved stations</h3>
+    <ul class="saved" id="saved"></ul>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="settings" aria-labelledby="settings-title">
+  <div class="sheet-inner">
+    <div class="sheet-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <label class="field-label" for="app-key">TfL app key (optional)</label>
+    <input class="input" id="app-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your primary key">
+    <p class="hint">The board works without a key. If you see "TfL is limiting requests", get a free key at <a href="https://api-portal.tfl.gov.uk/" target="_blank" rel="noopener">api-portal.tfl.gov.uk</a> and paste it here. It stays on this phone.</p>
+    <div class="row">
+      <button class="primary" id="save-key" type="button">Save key</button>
+      <button class="ghost" id="clear-key" type="button">Remove key</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+'use strict';
+
+const API = 'https://api.tfl.gov.uk';
+const RAIL_MODES = ['tube', 'dlr', 'overground', 'elizabeth-line', 'tram'];
+const BOARD_MODES = new Set(['overground', 'elizabeth-line']); // these lines have a proper departure board feed
+const CENTRE = { lat: 51.5080, lon: -0.1247 };               // Charing Cross
+const REFRESH_MS = 30000;
+const HORIZON_MIN = 90;
+const MAX_ROWS = 10;
+const MODE_LABEL = { tube: 'Underground', dlr: 'DLR', overground: 'Overground', 'elizabeth-line': 'Elizabeth line', tram: 'Tram' };
+const LINE_COLOURS = {
+  bakerloo: '#B36305', central: '#E32017', circle: '#FFD300', district: '#00782A',
+  'hammersmith-city': '#F3A9BB', jubilee: '#A0A5A9', metropolitan: '#9B0056', northern: '#1C1C1C',
+  piccadilly: '#003688', victoria: '#0098D4', 'waterloo-city': '#95CDBA',
+  dlr: '#00A4A7', elizabeth: '#6950A1', tram: '#5FB526', 'london-overground': '#EE7C0E',
+  liberty: '#5D6061', lioness: '#FAA61A', mildmay: '#437EC1', suffragette: '#5BBD72',
+  weaver: '#823A62', windrush: '#ED1B00'
+};
+// Rough positions of common Elizabeth line destinations, so direction works before any lookups.
+const SEED_COORDS = {
+  shenfield: [51.6309, 0.3299], brentwood: [51.6136, 0.2995], haroldwood: [51.5928, 0.2331],
+  gideapark: [51.5819, 0.2059], romford: [51.5749, 0.1832], chadwellheath: [51.5680, 0.1290],
+  ilford: [51.5590, 0.0686], stratford: [51.5416, -0.0033], stratfordlondon: [51.5416, -0.0033],
+  liverpoolstreet: [51.5178, -0.0823], whitechapel: [51.5195, -0.0597], paddington: [51.5154, -0.1755],
+  abbeywood: [51.4908, 0.1214], canarywharf: [51.5059, -0.0198], ealingbroadway: [51.5150, -0.3017],
+  hanwell: [51.5118, -0.3388], hayesharlington: [51.5031, -0.4206], westdrayton: [51.5102, -0.4721],
+  heathrowterminal4: [51.4583, -0.4455], heathrowterminal5: [51.4702, -0.4903],
+  heathrowterminals23: [51.4713, -0.4544], slough: [51.5119, -0.5915], maidenhead: [51.5187, -0.7228],
+  twyford: [51.4755, -0.8634], reading: [51.4589, -0.9719]
+};
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const store = {
+  get(k, fb) { try { const v = localStorage.getItem('nt:' + k); return v == null ? fb : JSON.parse(v); } catch { return fb; } },
+  set(k, v) { try { localStorage.setItem('nt:' + k, JSON.stringify(v)); } catch { /* storage unavailable */ } }
+};
+
+const state = {
+  favs: store.get('favs', []),
+  station: store.get('station', null),
+  prefs: store.get('prefs', {}),
+  key: store.get('key', ''),
+  destCoords: store.get('dest', {}),
+  deps: [],
+  updatedAt: 0,
+  lastAttempt: 0,
+  error: null,
+  loading: false,
+  fetchedOnce: false
+};
+
+/* ---------- TfL API ---------- */
+async function api(path, params = {}) {
+  const url = new URL(API + path);
+  for (const [k, v] of Object.entries(params)) if (v != null && v !== '') url.searchParams.set(k, v);
+  if (state.key) url.searchParams.set('app_key', state.key);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) { const e = new Error('TfL ' + res.status); e.status = res.status; throw e; }
+    return await res.json();
+  } finally { clearTimeout(timer); }
+}
+
+/* ---------- Helpers ---------- */
+function cleanName(n) {
+  if (!n) return '';
+  return String(n)
+    .replace(/\s+(Rail|Underground|DLR|Tram|Overground|ELL|Crossrail)\s+(Station|Stop)$/i, '')
+    .replace(/\s+(Station|Stop)$/i, '')
+    .trim();
+}
+const normKey = (n) => cleanName(n).toLowerCase().replace(/[^a-z0-9]/g, '');
+function parseT(s) {
+  if (!s) return null;
+  const t = Date.parse(s);
+  return Number.isFinite(t) && t > 946684800000 ? t : null;
+}
+function mmss(s) {
+  const m = /^(-?\d+):(\d{2})$/.exec(String(s || ''));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+function platformLabel(p) {
+  if (p == null) return '';
+  p = String(p).trim();
+  if (!p || /^null$/i.test(p) || p === '-' || p === '0') return '';
+  if (/platform/i.test(p)) return p.replace(/\s+-\s+/, ' · ');
+  return 'Platform ' + p;
+}
+function lineName(id, name, mode) {
+  if (id === 'elizabeth') return 'Elizabeth line';
+  if (mode === 'dlr' || id === 'dlr') return 'DLR';
+  if (mode === 'tram' || id === 'tram') return 'Tram';
+  const n = name || String(id || '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  if (/overground|line$/i.test(n)) return n;
+  return (mode === 'tube' || mode === 'overground') ? n + ' line' : n;
+}
+const lineColour = (id) => LINE_COLOURS[id] || 'var(--accent)';
+function inkFor(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return '#fff';
+  const n = parseInt(m[1], 16);
+  const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255].map((v) => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; });
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.4 ? '#15121D' : '#FFFFFF';
+}
+const clockFmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+const clockSecFmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/London' });
+const fmtClock = (t) => clockFmt.format(t);
+function whenParts(t) {
+  const s = Math.round((t - Date.now()) / 1000);
+  if (s < 60) return { big: 'Due', unit: '' };
+  return { big: String(Math.floor(s / 60)), unit: 'min' };
+}
+const toRad = (d) => d * Math.PI / 180;
+function bearing(a, b) {
+  const y = b.lat - a.lat;
+  const x = (b.lon - a.lon) * Math.cos(toRad((a.lat + b.lat) / 2));
+  return (Math.atan2(x, y) * 180 / Math.PI + 360) % 360;
+}
+function distKm(a, b) {
+  const y = (b.lat - a.lat) * 111.32;
+  const x = (b.lon - a.lon) * 111.32 * Math.cos(toRad((a.lat + b.lat) / 2));
+  return Math.hypot(x, y);
+}
+
+/* ---------- Stations ---------- */
+async function searchStations(q) {
+  const data = await api('/StopPoint/Search/' + encodeURIComponent(q), { modes: RAIL_MODES.join(','), maxResults: 12 });
+  const matches = Array.isArray(data && data.matches) ? data.matches : [];
+  return matches
+    .filter((m) => m && m.id)
+    .map((m) => ({ id: m.id, name: cleanName(m.name), lat: m.lat, lon: m.lon, modes: (m.modes || []).filter((x) => RAIL_MODES.includes(x)) }));
+}
+
+async function resolveStation(match) {
+  const d = await api('/StopPoint/' + encodeURIComponent(match.id));
+  const modeOf = {};
+  for (const g of d.lineModeGroups || []) for (const l of g.lineIdentifier || []) modeOf[l] = g.modeName;
+  const nameOf = {};
+  for (const l of d.lines || []) nameOf[l.id] = l.name;
+  const info = (id) => ({ id, name: lineName(id, nameOf[id], modeOf[id]), mode: modeOf[id] });
+  const targets = new Map();
+  const seenLines = new Set();
+  for (const g of d.lineGroup || []) {
+    const tid = g.stationAtcoCode || g.naptanIdReference;
+    if (!tid) continue;
+    const lines = (g.lineIdentifier || []).filter((l) => RAIL_MODES.includes(modeOf[l]) && !seenLines.has(l));
+    if (!lines.length) continue;
+    const t = targets.get(tid) || { id: tid, lines: [] };
+    for (const l of lines) { seenLines.add(l); t.lines.push(info(l)); }
+    targets.set(tid, t);
+  }
+  let list = [...targets.values()];
+  if (!list.length) {
+    const lines = Object.keys(modeOf).filter((l) => RAIL_MODES.includes(modeOf[l])).map(info);
+    list = [{ id: match.id, lines }];
+  }
+  return {
+    id: match.id,
+    name: cleanName(d.commonName) || match.name,
+    lat: Number.isFinite(d.lat) ? d.lat : match.lat,
+    lon: Number.isFinite(d.lon) ? d.lon : match.lon,
+    targets: list
+  };
+}
+
+const stationLines = (st) => {
+  const out = [];
+  for (const t of st?.targets || []) for (const l of t.lines) if (!out.some((x) => x.id === l.id)) out.push(l);
+  return out;
+};
+const prefsFor = (id) => Object.assign({ dir: 'all', line: 'all' }, state.prefs[id] || {});
+function setPref(id, patch) {
+  state.prefs[id] = Object.assign(prefsFor(id), patch);
+  store.set('prefs', state.prefs);
+}
+
+/* ---------- Departures ---------- */
+function fromBoard(d, stopId, line) {
+  const sched = parseT(d.scheduledTimeOfDeparture);
+  let time = parseT(d.estimatedTimeOfDeparture) ?? sched;
+  if (time == null) { const s = mmss(d.minutesAndSecondsToDeparture); if (s != null) time = Date.now() + s * 1000; }
+  if (time == null) return null;
+  if (d.destinationNaptanId && d.destinationNaptanId === (d.naptanId || stopId)) return null; // terminates here
+  return {
+    src: 'board', lineId: line.id, lineName: line.name,
+    dest: cleanName(d.destinationName) || 'Check front of train', destId: d.destinationNaptanId || null,
+    platform: platformLabel(d.platformName), time, sched,
+    status: d.departureStatus || 'OnTime', cause: d.cause || ''
+  };
+}
+
+async function getArrivals(id, lines) {
+  const data = await api('/StopPoint/' + encodeURIComponent(id) + '/Arrivals');
+  const want = lines ? new Set(lines.map((l) => l.id)) : null;
+  return (Array.isArray(data) ? data : [])
+    .filter((p) => p && p.modeName !== 'bus' && (!want || want.has(p.lineId)))
+    .map((p) => {
+      let time = parseT(p.expectedArrival);
+      if (time == null && Number.isFinite(p.timeToStation)) time = Date.now() + p.timeToStation * 1000;
+      if (time == null) return null;
+      if (p.destinationNaptanId && p.destinationNaptanId === p.naptanId) return null;
+      const known = lines && lines.find((l) => l.id === p.lineId);
+      return {
+        src: 'arr', lineId: p.lineId, lineName: known ? known.name : lineName(p.lineId, p.lineName, p.modeName),
+        dest: cleanName(p.destinationName) || cleanName(p.towards) || 'Check front of train',
+        destId: p.destinationNaptanId || null, platform: platformLabel(p.platformName),
+        time, sched: null, status: null, cause: ''
+      };
+    })
+    .filter(Boolean);
+}
+
+async function getBoard(id, line) {
+  let data;
+  try {
+    data = await api('/StopPoint/' + encodeURIComponent(id) + '/ArrivalDepartures', { lineIds: line.id });
+  } catch (e) {
+    return getArrivals(id, [line]);
+  }
+  const out = (Array.isArray(data) ? data : []).map((d) => fromBoard(d, id, line)).filter(Boolean);
+  if (!out.length) return getArrivals(id, [line]).catch(() => []);
+  return out;
+}
+
+function dedupe(list) {
+  const seen = new Set();
+  return list.filter((d) => {
+    const k = d.lineId + '|' + normKey(d.dest) + '|' + Math.round(d.time / 60000);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+async function fetchDepartures(st) {
+  const jobs = [];
+  for (const t of st.targets) {
+    const board = t.lines.filter((l) => BOARD_MODES.has(l.mode));
+    const arr = t.lines.filter((l) => !BOARD_MODES.has(l.mode));
+    for (const l of board) jobs.push(getBoard(t.id, l));
+    if (arr.length || !t.lines.length) jobs.push(getArrivals(t.id, arr.length ? arr : null));
+  }
+  const settled = await Promise.allSettled(jobs);
+  const ok = settled.filter((s) => s.status === 'fulfilled');
+  if (!ok.length) throw (settled[0] && settled[0].reason) || new Error('No data');
+  return dedupe(ok.flatMap((s) => s.value)).sort((a, b) => a.time - b.time);
+}
+
+/* ---------- Direction ---------- */
+const pendingDest = new Set();
+const failedDest = new Set();
+function queueDestLookup(id) {
+  if (pendingDest.has(id) || failedDest.has(id) || pendingDest.size >= 6) return;
+  pendingDest.add(id);
+  api('/StopPoint/' + encodeURIComponent(id))
+    .then((d) => {
+      if (Number.isFinite(d && d.lat) && Number.isFinite(d && d.lon)) {
+        state.destCoords[id] = [d.lat, d.lon];
+        store.set('dest', state.destCoords);
+        scheduleRender();
+      } else failedDest.add(id);
+    })
+    .catch(() => failedDest.add(id))
+    .finally(() => pendingDest.delete(id));
+}
+function coordsFor(dep) {
+  const c = dep.destId && state.destCoords[dep.destId];
+  if (c) return { lat: c[0], lon: c[1] };
+  const s = SEED_COORDS[normKey(dep.dest)];
+  if (s) return { lat: s[0], lon: s[1] };
+  if (dep.destId) queueDestLookup(dep.destId);
+  return null;
+}
+const directionsUseful = (st) => st && Number.isFinite(st.lat) && Number.isFinite(st.lon) && distKm(st, CENTRE) > 3;
+function heading(dep, st) {
+  const c = coordsFor(dep);
+  if (!c || distKm(st, c) < 0.3) return null;
+  const diff = Math.abs(((bearing(st, c) - bearing(st, CENTRE)) + 540) % 360 - 180);
+  return diff <= 90 ? 'towards' : 'away';
+}
+
+function visibleDeps(st) {
+  const p = prefsFor(st.id);
+  const useDir = directionsUseful(st) && p.dir !== 'all';
+  const lines = stationLines(st);
+  const useLine = lines.length > 1 && p.line !== 'all' && lines.some((l) => l.id === p.line);
+  const now = Date.now();
+  return state.deps
+    .filter((d) => d.time - now > -45000 && d.time - now < HORIZON_MIN * 60000)
+    .filter((d) => !useLine || d.lineId === p.line)
+    .filter((d) => { if (!useDir) return true; const h = heading(d, st); return h == null || h === p.dir; });
+}
+
+function statusInfo(d) {
+  const s = String(d.status || '').toLowerCase();
+  if (s === 'cancelled') return { cls: 'bad', text: 'Cancelled', off: true };
+  if (s === 'notstoppingatstation') return { cls: 'bad', text: 'Not stopping here', off: true };
+  const late = d.sched != null && d.time - d.sched >= 60000;
+  if (late) return { cls: 'warn', text: 'Delayed · scheduled ' + fmtClock(d.sched) };
+  if (s === 'delayed') return { cls: 'warn', text: 'Delayed' };
+  if (d.src === 'board' && s === 'ontime') return { cls: 'ok', text: 'On time' };
+  if (d.status && s !== 'ontime') return { cls: 'warn', text: String(d.status).replace(/([a-z])([A-Z])/g, '$1 $2') };
+  return null;
+}
+
+/* ---------- Rendering ---------- */
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; render(); });
+}
+
+function render() {
+  const st = state.station;
+  $('#station-name').textContent = st ? st.name : (state.error ? 'No station yet' : 'Finding station…');
+  document.title = st ? st.name + ' · Next Train' : 'Next Train';
+
+  const isFav = !!st && state.favs.some((f) => f.id === st.id);
+  const fav = $('#fav-btn');
+  fav.setAttribute('aria-pressed', String(isFav));
+  fav.setAttribute('aria-label', isFav ? 'Remove from saved stations' : 'Save this station');
+  fav.disabled = !st;
+
+  const lines = stationLines(st);
+  $('#lines').innerHTML = lines.map((l) => `<span class="line-chip" style="--line:${lineColour(l.id)}">${esc(l.name)}</span>`).join('');
+
+  renderFavs();
+  renderControls(st, lines);
+  renderStatus();
+  renderBoard(st);
+  $('#key-note').textContent = state.key ? 'Using your TfL app key.' : '';
+}
+
+function renderFavs() {
+  const cur = state.station && state.station.id;
+  const chips = state.favs.map((f) =>
+    `<button class="fav" type="button" data-fav="${esc(f.id)}" aria-current="${f.id === cur}">${esc(f.name)}</button>`).join('');
+  $('#favs').innerHTML = chips + `<button class="fav add" type="button" data-open-picker>+ Add station</button>`;
+}
+
+function renderControls(st, lines) {
+  const seg = $('#dir-seg');
+  const p = st ? prefsFor(st.id) : { dir: 'all', line: 'all' };
+  seg.hidden = !directionsUseful(st);
+  for (const b of seg.querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.dir === p.dir));
+
+  const lf = $('#line-filter');
+  if (lines.length > 1) {
+    const active = lines.some((l) => l.id === p.line) ? p.line : 'all';
+    lf.innerHTML = `<button type="button" data-line-all aria-pressed="${active === 'all'}">All lines</button>` +
+      lines.map((l) => `<button type="button" data-line="${esc(l.id)}" style="--line:${lineColour(l.id)}" aria-pressed="${active === l.id}">${esc(l.name)}</button>`).join('');
+    lf.hidden = false;
+  } else {
+    lf.innerHTML = '';
+    lf.hidden = true;
+  }
+}
+
+function renderStatus() {
+  const box = $('#status');
+  const stale = state.updatedAt && Date.now() - state.updatedAt > 2 * 60000;
+  box.classList.toggle('loading', state.loading);
+  box.classList.toggle('stale', !!(stale || (state.error && state.updatedAt)));
+  let text;
+  if (state.loading && !state.updatedAt) text = 'Loading live times…';
+  else if (state.updatedAt) text = (stale ? 'Last updated ' : 'Updated ') + clockSecFmt.format(state.updatedAt) + (stale ? '' : ' · every 30s');
+  else if (state.error) text = 'No live times yet';
+  else text = 'Loading live times…';
+  $('#updated').textContent = text;
+
+  const banner = $('#banner');
+  if (state.error) {
+    banner.innerHTML = errorHtml(state.error) +
+      (state.updatedAt ? `<span>Showing times from ${esc(fmtClock(state.updatedAt))}.</span>` : '');
+    banner.hidden = false;
+  } else banner.hidden = true;
+}
+
+function errorHtml(err) {
+  if (err && err.kind === 'seed') return `<span><strong>Couldn't find Chadwell Heath.</strong> Tap the station name to pick one.</span>`;
+  const s = err && err.status;
+  if (s === 429) return `<span><strong>TfL is limiting requests.</strong> Add a free TfL key in Settings to raise the limit. Retrying every 30 seconds.</span>`;
+  if (s === 404) return `<span><strong>TfL has no live times for this station.</strong> Try another station.</span>`;
+  if (s) return `<span><strong>TfL returned an error (${esc(s)}).</strong> Retrying every 30 seconds.</span>`;
+  if (navigator.onLine === false) return `<span><strong>You're offline.</strong> Times will refresh when you reconnect.</span>`;
+  return `<span><strong>Can't reach TfL right now.</strong> Retrying every 30 seconds.</span>`;
+}
+
+function renderBoard(st) {
+  const next = $('#next');
+  const board = $('#board');
+  next.style.removeProperty('--line');
+  next.style.removeProperty('--line-ink');
+
+  if (!st && state.error) {
+    next.className = 'next empty';
+    next.innerHTML = `<div class="next-head"><span>Next train</span></div><div class="next-body"><p><strong>No station loaded yet.</strong>Tap the station name above to choose one.</p></div>`;
+    board.innerHTML = '';
+    $('#board-title').hidden = true;
+    return;
+  }
+  if (!st || (!state.fetchedOnce && !state.deps.length)) {
+    next.className = 'next empty';
+    next.innerHTML = `<div class="next-head"><span>Next train</span></div><div class="next-body"><p>Loading live times…</p></div>`;
+    board.classList.add('loading-rows');
+    board.innerHTML = [0, 1, 2].map(() => `<li class="dep"><span class="sq"></span><div><div class="skel" style="width:60%"></div><div class="skel" style="width:35%;margin-top:8px;height:10px"></div></div><div class="skel" style="width:44px"></div></li>`).join('');
+    $('#board-title').hidden = false;
+    return;
+  }
+  board.classList.remove('loading-rows');
+
+  const deps = visibleDeps(st);
+  const p = prefsFor(st.id);
+  const heroIdx = deps.findIndex((d) => !(statusInfo(d) || {}).off);
+  const hero = heroIdx >= 0 ? deps[heroIdx] : null;
+  const rest = deps.filter((_, i) => i !== heroIdx).slice(0, MAX_ROWS);
+
+  if (hero) {
+    const col = LINE_COLOURS[hero.lineId] || '#6950A1';
+    next.style.setProperty('--line', col);
+    next.style.setProperty('--line-ink', inkFor(col));
+    const w = whenParts(hero.time);
+    const si = statusInfo(hero);
+    next.className = 'next';
+    next.innerHTML =
+      `<div class="next-head"><span>Next train</span>${hero.platform ? `<span class="plat">${esc(hero.platform)}</span>` : ''}</div>
+       <div class="next-body">
+         <div class="next-main">
+           <div class="next-dest">${esc(hero.dest)}</div>
+           <div class="next-when"><span class="big">${esc(w.big)}</span>${w.unit ? `<span class="unit">${w.unit}</span>` : ''}</div>
+         </div>
+         <div class="next-meta">
+           <span class="clock">${esc(fmtClock(hero.time))}</span>
+           <span>${esc(hero.lineName)}</span>
+           ${si ? `<span class="pill ${si.cls}">${esc(si.text)}</span>` : ''}
+         </div>
+       </div>`;
+  } else {
+    next.className = 'next empty';
+    const dirText = directionsUseful(st) && p.dir !== 'all'
+      ? (p.dir === 'towards' ? ' towards central London' : ' away from central London') : '';
+    next.innerHTML =
+      `<div class="next-head"><span>Next train</span></div>
+       <div class="next-body"><p><strong>No trains${esc(dirText)} in the next ${HORIZON_MIN} minutes.</strong>
+       ${state.error ? 'Live times are unavailable right now.' : 'Services may have finished for the night, or there may be disruption.'}</p>
+       ${dirText ? `<button class="lcd-btn" type="button" data-dir-all>Show all directions</button>` : ''}</div>`;
+  }
+
+  $('#board-title').hidden = !rest.length && !hero;
+  if (!rest.length) {
+    board.innerHTML = hero ? `<li class="board-empty">No more departures in the next ${HORIZON_MIN} minutes.</li>` : '';
+    if (!hero) $('#board-title').hidden = true;
+    return;
+  }
+  board.innerHTML = rest.map((d) => {
+    const w = whenParts(d.time);
+    const si = statusInfo(d);
+    const bits = [];
+    if (d.platform) bits.push(`<span>${esc(d.platform)}</span>`);
+    bits.push(`<span>${esc(d.lineName)}</span>`);
+    if (si && si.cls !== 'ok') bits.push(`<span class="s-${si.cls}">${esc(si.text)}</span>`);
+    return `<li class="dep${si && si.off ? ' cancelled' : ''}" style="--line:${lineColour(d.lineId)}">
+      <span class="sq" aria-hidden="true"></span>
+      <div><div class="dep-dest">${esc(d.dest)}</div><div class="dep-sub">${bits.join('')}</div></div>
+      <div class="dep-time"><span class="dep-mins">${esc(w.unit ? w.big + ' min' : w.big)}</span><span class="dep-clock">${esc(fmtClock(d.time))}</span></div>
+    </li>`;
+  }).join('');
+}
+
+/* ---------- Refresh loop ---------- */
+let inflight = null;
+function restartProgress() {
+  const bar = $('#progress-bar');
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  void bar.offsetWidth;
+  bar.style.transition = `width ${REFRESH_MS}ms linear`;
+  bar.style.width = '100%';
+}
+function refresh() {
+  const st = state.station;
+  if (!st) return Promise.resolve();
+  if (inflight) return inflight;
+  state.loading = true;
+  state.lastAttempt = Date.now();
+  renderStatus();
+  inflight = fetchDepartures(st)
+    .then((deps) => {
+      if (state.station !== st) return;
+      state.deps = deps;
+      state.updatedAt = Date.now();
+      state.error = null;
+    })
+    .catch((err) => { if (state.station === st) state.error = err; })
+    .finally(() => {
+      inflight = null;
+      state.loading = false;
+      state.fetchedOnce = true;
+      render();
+      restartProgress();
+    });
+  return inflight;
+}
+setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  if (!state.station) { if (Date.now() - state.lastAttempt >= REFRESH_MS) trySeed(); return; }
+  if (Date.now() - state.lastAttempt >= REFRESH_MS) refresh();
+  else scheduleRender();
+}, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - state.lastAttempt > 15000) refresh();
+});
+window.addEventListener('online', () => refresh());
+
+function setStation(st) {
+  state.station = st;
+  store.set('station', st);
+  const i = state.favs.findIndex((f) => f.id === st.id);
+  if (i >= 0) { state.favs[i] = st; store.set('favs', state.favs); }
+  state.deps = [];
+  state.updatedAt = 0;
+  state.error = null;
+  state.fetchedOnce = false;
+  render();
+  refresh();
+}
+
+/* ---------- Station picker ---------- */
+const picker = $('#picker');
+const searchInput = $('#station-search');
+let searchSeq = 0;
+let searchTimer = null;
+let lastResults = [];
+
+function openPicker() {
+  renderSaved();
+  $('#results').innerHTML = '';
+  $('#search-hint').textContent = 'Type at least two letters.';
+  searchInput.value = '';
+  picker.showModal();
+  setTimeout(() => searchInput.focus(), 50);
+}
+function renderSaved() {
+  const cur = state.station && state.station.id;
+  $('#saved-title').hidden = !state.favs.length;
+  $('#saved').innerHTML = state.favs.map((f) => `
+    <li>
+      <button class="result-btn" type="button" data-fav="${esc(f.id)}">
+        <span class="r-name">${esc(f.name)}${f.id === cur ? ' · showing' : ''}</span>
+        <span class="r-modes">${esc(stationLines(f).map((l) => l.name).join(', '))}</span>
+      </button>
+      <button class="icon-btn" type="button" data-remove="${esc(f.id)}" aria-label="Remove ${esc(f.name)} from saved stations">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </li>`).join('');
+}
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  if (q.length < 2) { $('#results').innerHTML = ''; $('#search-hint').textContent = 'Type at least two letters.'; return; }
+  $('#search-hint').textContent = 'Searching…';
+  searchTimer = setTimeout(() => runSearch(q), 300);
+});
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); const q = searchInput.value.trim(); if (q.length >= 2) runSearch(q); }
+});
+async function runSearch(q) {
+  const seq = ++searchSeq;
+  try {
+    const res = await searchStations(q);
+    if (seq !== searchSeq) return;
+    lastResults = res;
+    $('#search-hint').textContent = res.length ? '' : `No stations match "${q}".`;
+    $('#results').innerHTML = res.map((m, i) => `
+      <li><button class="result-btn" type="button" data-result="${i}">
+        <span class="r-name">${esc(m.name)}</span>
+        <span class="r-modes">${esc(m.modes.map((x) => MODE_LABEL[x] || x).join(' · '))}</span>
+      </button></li>`).join('');
+  } catch (err) {
+    if (seq !== searchSeq) return;
+    $('#search-hint').textContent = err && err.status === 429
+      ? 'TfL is limiting requests. Try again in a minute, or add a key in Settings.'
+      : "Couldn't search right now. Check your connection and try again.";
+  }
+}
+picker.addEventListener('click', async (e) => {
+  if (e.target === picker || e.target.closest('[data-close]')) { picker.close(); return; }
+  const r = e.target.closest('[data-result]');
+  if (r) {
+    const m = lastResults[Number(r.dataset.result)];
+    if (!m) return;
+    r.querySelector('.r-modes').textContent = 'Loading…';
+    try {
+      const st = await resolveStation(m);
+      picker.close();
+      setStation(st);
+    } catch {
+      r.querySelector('.r-modes').textContent = "Couldn't load this station. Tap to try again.";
+    }
+    return;
+  }
+  const f = e.target.closest('[data-fav]');
+  if (f) { const st = state.favs.find((x) => x.id === f.dataset.fav); if (st) { picker.close(); setStation(st); } return; }
+  const rm = e.target.closest('[data-remove]');
+  if (rm) {
+    state.favs = state.favs.filter((x) => x.id !== rm.dataset.remove);
+    store.set('favs', state.favs);
+    renderSaved();
+    render();
+  }
+});
+
+/* ---------- Settings ---------- */
+const settings = $('#settings');
+$('#settings-btn').addEventListener('click', () => { $('#app-key').value = state.key; settings.showModal(); });
+settings.addEventListener('click', (e) => { if (e.target === settings || e.target.closest('[data-close]')) settings.close(); });
+$('#save-key').addEventListener('click', () => {
+  state.key = $('#app-key').value.trim();
+  store.set('key', state.key);
+  settings.close();
+  render();
+  refresh();
+});
+$('#clear-key').addEventListener('click', () => {
+  state.key = '';
+  $('#app-key').value = '';
+  store.set('key', '');
+  settings.close();
+  render();
+  refresh();
+});
+
+/* ---------- Main controls ---------- */
+$('#station-btn').addEventListener('click', openPicker);
+$('#refresh-btn').addEventListener('click', () => refresh());
+$('#fav-btn').addEventListener('click', () => {
+  const st = state.station;
+  if (!st) return;
+  if (state.favs.some((f) => f.id === st.id)) state.favs = state.favs.filter((f) => f.id !== st.id);
+  else state.favs.push(st);
+  store.set('favs', state.favs);
+  render();
+});
+document.addEventListener('click', (e) => {
+  if (e.target.closest('dialog')) return;
+  if (e.target.closest('[data-open-picker]')) { openPicker(); return; }
+  const fav = e.target.closest('.favs [data-fav]');
+  if (fav) {
+    const st = state.favs.find((x) => x.id === fav.dataset.fav);
+    if (st && (!state.station || st.id !== state.station.id)) setStation(st);
+    return;
+  }
+  const dirBtn = e.target.closest('#dir-seg [data-dir]');
+  if (dirBtn && state.station) { setPref(state.station.id, { dir: dirBtn.dataset.dir }); render(); return; }
+  if (e.target.closest('[data-dir-all]') && state.station) { setPref(state.station.id, { dir: 'all' }); render(); return; }
+  const lineBtn = e.target.closest('#line-filter [data-line]');
+  if (lineBtn && state.station) { setPref(state.station.id, { line: lineBtn.dataset.line }); render(); return; }
+  if (e.target.closest('#line-filter [data-line-all]') && state.station) { setPref(state.station.id, { line: 'all' }); render(); }
+});
+
+/* ---------- Start ---------- */
+async function seedDefault() {
+  const ms = await searchStations('Chadwell Heath');
+  const m = ms.find((x) => /chadwell heath/i.test(x.name) && x.modes.includes('elizabeth-line'))
+    || ms.find((x) => /chadwell heath/i.test(x.name));
+  if (!m) throw Object.assign(new Error('not found'), { kind: 'seed' });
+  const st = await resolveStation(m);
+  state.favs = [st];
+  store.set('favs', state.favs);
+  setPref(st.id, { dir: 'towards' });
+  return st;
+}
+
+let seeding = false;
+async function trySeed() {
+  if (seeding || state.station) return;
+  seeding = true;
+  state.lastAttempt = Date.now();
+  try {
+    const st = await seedDefault();
+    if (!state.station) setStation(st);
+  } catch (err) {
+    if (!state.station) { state.error = err; state.fetchedOnce = true; render(); }
+  } finally { seeding = false; }
+}
+
+function start() {
+  if (!state.station && state.favs.length) state.station = state.favs[0];
+  render();
+  if (state.station) refresh();
+  else trySeed();
+}
+window.addEventListener('online', () => { if (!state.station) trySeed(); });
+start();
+})();
+</script>
+</body>
+</html>
